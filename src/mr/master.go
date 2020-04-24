@@ -22,10 +22,13 @@ const MaxWaitTime = 10 * time.Second
 
 type Master struct {
 	sync.Mutex
-	MapStatus    []TaskStatus
-	ReduceStatus []TaskStatus
-	InputFiles   []string
-	AllDone      bool
+	MapStatus        []TaskStatus
+	ReduceStatus     []TaskStatus
+	InputFiles       []string
+	NumIdleMap       int
+	NumWorkingMap    int
+	NumIdleReduce    int
+	NumWorkingReduce int
 }
 
 // Your code here -- RPC handlers for the worker to call.
@@ -38,7 +41,10 @@ func (m *Master) Done() bool {
 	// Your code here.
 	m.Lock()
 	defer m.Unlock()
-	return m.AllDone
+	return m.NumIdleMap == 0 &&
+		m.NumWorkingMap == 0 &&
+		m.NumIdleReduce == 0 &&
+		m.NumWorkingReduce == 0
 }
 
 func (m *Master) ReadConfig(args *Empty, reply *ReadConfigReply) error {
@@ -53,6 +59,8 @@ func (m *Master) waitMap(taskID int) {
 	m.Lock()
 	if m.MapStatus[taskID] == Working {
 		m.MapStatus[taskID] = Idle
+		m.NumIdleMap += 1
+		m.NumWorkingMap -= 1
 		log.Printf("master: map task %v timeout\n", taskID)
 	}
 	m.Unlock()
@@ -63,6 +71,8 @@ func (m *Master) waitReduce(taskID int) {
 	m.Lock()
 	if m.ReduceStatus[taskID] == Working {
 		m.ReduceStatus[taskID] = Idle
+		m.NumIdleReduce += 1
+		m.NumWorkingReduce -= 1
 		log.Printf("master: reduce task %v timeout\n", taskID)
 	}
 	m.Unlock()
@@ -71,29 +81,33 @@ func (m *Master) waitReduce(taskID int) {
 func (m *Master) TaskRequest(args *Empty, reply *Task) error {
 	m.Lock()
 	defer m.Unlock()
-
-	for i, s := range m.MapStatus {
-		if s == Idle {
-			*reply = Task(i)
-			m.MapStatus[i] = Working
-			log.Printf("master: handout map %v\n", i)
-			go m.waitMap(i)
-			return nil
+	if m.NumIdleMap != 0 {
+		for i, s := range m.MapStatus {
+			if s == Idle {
+				*reply = Task(i)
+				m.NumIdleMap -= 1
+				m.NumWorkingMap += 1
+				m.MapStatus[i] = Working
+				go m.waitMap(i)
+				log.Printf("master: assign map task %v\n", i)
+				return nil
+			}
+		}
+	} else if m.NumWorkingMap == 0 && m.NumIdleReduce != 0 {
+		for i, s := range m.ReduceStatus {
+			if s == Idle {
+				*reply = Task(i + len(m.MapStatus))
+				m.NumIdleReduce -= 1
+				m.NumWorkingReduce += 1
+				m.ReduceStatus[i] = Working
+				go m.waitReduce(i)
+				log.Printf("master: assign reduce task %v\n", i)
+				return nil
+			}
 		}
 	}
-
-	for i, s := range m.ReduceStatus {
-		if s == Idle {
-			*reply = Task(i + len(m.MapStatus))
-			m.ReduceStatus[i] = Working
-			log.Printf("master: handout reduce %v\n", i)
-			go m.waitReduce(i)
-			return nil
-		}
-	}
-
-	m.AllDone = true
-	*reply = -1
+	*reply = Task(-1)
+	// log.Printf("master: suspend worker\n")
 	return nil
 }
 
@@ -105,12 +119,24 @@ func (m *Master) TaskDone(args *Task, reply *Empty) error {
 		return nil
 	}
 	if n < len(m.MapStatus) {
+		log.Printf("master: finished map %v\n", n)
+		s := m.MapStatus[n]
+		if s == Idle {
+			m.NumIdleMap -= 1
+		} else if s == Working {
+			m.NumWorkingMap -= 1
+		}
 		m.MapStatus[n] = Done
-		log.Printf("master: map task %v done\n", n)
 	} else {
 		n -= len(m.MapStatus)
+		log.Printf("master: finished reduce %v\n", n)
+		s := m.ReduceStatus[n]
+		if s == Idle {
+			m.NumIdleReduce -= 1
+		} else if s == Working {
+			m.NumWorkingReduce -= 1
+		}
 		m.ReduceStatus[n] = Done
-		log.Printf("master: reduce task %v done\n", n)
 	}
 	return nil
 }
@@ -127,7 +153,9 @@ func MakeMaster(files []string, nReduce int) *Master {
 	m.MapStatus = make([]TaskStatus, len(files))
 	m.ReduceStatus = make([]TaskStatus, nReduce)
 	m.InputFiles = files
-
+	m.NumIdleMap = len(files)
+	m.NumIdleReduce = nReduce
+	log.Println("created master:", m.MapStatus, m.ReduceStatus, m.NumIdleMap, m.NumWorkingMap, m.NumIdleReduce, m.NumWorkingReduce)
 	m.server()
 	return &m
 }

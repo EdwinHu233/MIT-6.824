@@ -114,20 +114,23 @@ func readIntermediateFile(mapID int, reduceID int, kva *[]KeyValue) bool {
 
 func readAllIntermediateFiles(reduceID int, numMap int) []KeyValue {
 	kva := []KeyValue{}
-	numRead := 0
-	read := make([]bool, numMap)
-	for numRead < numMap {
-		for i := 0; i < numMap; i += 1 {
-			if read[i] {
-				continue
-			}
-			if readIntermediateFile(i, reduceID, &kva) {
-				read[i] = true
-				numRead += 1
-			}
-		}
-		time.Sleep(time.Microsecond * 50)
+	for i := 0; i < numMap; i += 1 {
+		readIntermediateFile(i, reduceID, &kva)
 	}
+	// numRead := 0
+	// read := make([]bool, numMap)
+	// for numRead < numMap {
+	// 	for i := 0; i < numMap; i += 1 {
+	// 		if read[i] {
+	// 			continue
+	// 		}
+	// 		if readIntermediateFile(i, reduceID, &kva) {
+	// 			read[i] = true
+	// 			numRead += 1
+	// 		}
+	// 	}
+	// 	time.Sleep(time.Microsecond * 50)
+	// }
 	return kva
 }
 
@@ -164,18 +167,23 @@ func Worker(mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
 	config := readConfig()
 	// Your worker implementation here.
-	var args Empty
-	var reply Task
-	for call("Master.TaskRequest", &args, &reply) {
-		n := int(reply)
+	var empty Empty
+	var task Task
+	for call("Master.TaskRequest", &empty, &task) {
+		n := int(task)
 		if n < 0 {
-			return
-		}
-		if n < config.NumMap {
+			time.Sleep(time.Microsecond * 50)
+		} else if n < config.NumMap {
+			log.Printf("worker: doing map %v\n", n)
 			doMapTask(mapf, n, config.InputFiles[n], config.NumReduce)
+			log.Printf("worker: finished map %v\n", n)
+			call("Master.TaskDone", &task, &empty)
 		} else if n < config.NumMap+config.NumReduce {
 			n -= config.NumMap
+			log.Printf("worker: doing reduce %v\n", n)
 			doReduceTask(reducef, n, config.NumMap)
+			log.Printf("worker: finished reduce %v\n", n)
+			call("Master.TaskDone", &task, &empty)
 		} else {
 			log.Fatalf("worker: invalid task %v\n", n)
 		}
