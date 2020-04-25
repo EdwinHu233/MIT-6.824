@@ -12,5 +12,5 @@ Run the test script:
 
 ```bash
 cd src/main
-bash test-mr.sh
+GO111MODULE=off bash test-mr.sh 2> log
 ```
