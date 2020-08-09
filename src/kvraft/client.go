@@ -1,6 +1,6 @@
 package kvraft
 
-import "../labrpc"
+import "lab6824/labrpc"
 import "crypto/rand"
 import "math/big"
 

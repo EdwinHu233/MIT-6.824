@@ -1,3 +1,3 @@
-module lab6.824
+module lab6824
 
 go 1.14

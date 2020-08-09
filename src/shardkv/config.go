@@ -1,7 +1,7 @@
 package shardkv
 
-import "../shardmaster"
-import "../labrpc"
+import "lab6824/shardmaster"
+import "lab6824/labrpc"
 import "testing"
 import "os"
 
@@ -12,7 +12,7 @@ import "math/rand"
 import "encoding/base64"
 import "sync"
 import "runtime"
-import "../raft"
+import "lab6824/raft"
 import "strconv"
 import "fmt"
 import "time"
