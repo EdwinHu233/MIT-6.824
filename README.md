@@ -14,5 +14,12 @@ To run the test script:
 
 ```bash
 cd src/main
-GO111MODULE=off bash test-mr.sh 2> log
+bash test-mr.sh 2> log
+```
+
+To clean up:
+
+```bash
+# stay in src/main
+rm log mr-tmp/ mrsequential mrmaster mrworker -r
 ```
