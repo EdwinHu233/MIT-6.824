@@ -6,6 +6,9 @@ import (
 )
 
 func (rf *Raft) convertToFollower(newTerm int32, resetTimer bool) {
+	// rf.mu.Lock()
+	// defer rf.mu.Unlock()
+
 	if newTerm < rf.currentTerm {
 		log.Fatal("convertToFollower: outdated newTerm")
 	}
@@ -17,8 +20,6 @@ func (rf *Raft) convertToFollower(newTerm int32, resetTimer bool) {
 		rf.votedFor = -1
 	}
 
-	// TODO
-	// Should the peer reset timer when converts to follower?
 	if resetTimer {
 		rf.resetTimer()
 	}
@@ -27,9 +28,35 @@ func (rf *Raft) convertToFollower(newTerm int32, resetTimer bool) {
 // convertToLeader converts this peer to leader,
 // and sends heartbeats to other peers.
 func (rf *Raft) convertToLeader() {
+	// rf.mu.Lock()
+	// defer rf.mu.Unlock()
+
 	if rf.status != candidate {
 		log.Fatalf("convertToLeader: not a candidate")
 	}
+
+	rf.status = leader
+
+	args := &AppendEntriesArgs{
+		Term:     rf.currentTerm,
+		LeaderID: rf.me,
+	}
+	go func(args *AppendEntriesArgs) {
+		for rf.checkStatus(leader) && rf.getTerm() == args.Term {
+			for server := range rf.peers {
+				if server != rf.me {
+					go func(server int, args *AppendEntriesArgs) {
+						reply := &AppendEntriesReply{}
+						ok := rf.sendAppendEntries(server, args, reply)
+						if ok {
+							rf.appendEntriesReplies <- *reply
+						}
+					}(server, args)
+				}
+			}
+			time.Sleep(rf.heartbeatInterval)
+		}
+	}(args)
 }
 
 // convertToCandidate converts this peer to candidate,
@@ -38,6 +65,9 @@ func (rf *Raft) convertToLeader() {
 func (rf *Raft) convertToCandidate() {
 	// DPrintf("%d starts convertToCandidate\n", rf.me)
 	// defer DPrintf("%d stops convertToCandidate\n", rf.me)
+
+	// rf.mu.Lock()
+	// defer rf.mu.Unlock()
 
 	rf.status = candidate
 
@@ -48,22 +78,21 @@ func (rf *Raft) convertToCandidate() {
 
 	rf.resetTimer()
 
+	args := &RequestVoteArgs{
+		Term:         rf.getTerm(),
+		CandidateID:  rf.me,
+		LastLogIndex: len(rf.log) - 1,
+		LastLogTerm:  rf.log[len(rf.log)-1].Term,
+	}
+
 	for i := range rf.peers {
 		if i != rf.me {
 			go func(server int) {
-				args := RequestVoteArgs{
-					Term:         rf.getTerm(),
-					CandidateID:  rf.me,
-					LastLogIndex: len(rf.log) - 1,
-					LastLogTerm:  rf.log[len(rf.log)-1].Term,
+				reply := &RequestVoteReply{}
+				ok := rf.sendRequestVote(i, args, reply)
+				if ok {
+					rf.requestVoteReplies <- *reply
 				}
-				reply := RequestVoteReply{}
-				ok := rf.sendRequestVoteWithRetries(server, &args, &reply)
-				if !ok {
-					reply.VoteGranted = false
-					reply.Term = -1
-				}
-				rf.requestVoteReplies <- reply
 			}(i)
 		}
 	}
@@ -72,75 +101,86 @@ func (rf *Raft) convertToCandidate() {
 // actAsFollower follows the rules that are for followers,
 // as specified in figure 2 of the original paper.
 // It assumes the caller has required the mutex.
-func (rf *Raft) actAsFollower() {
-	// DPrintf("%d starts actAsFollower\n", rf.me)
-	// defer DPrintf("%d stops actAsFollower\n", rf.me)
+func (rf *Raft) actAsFollower(term int32) {
+	DPrintf("%d starts actAsFollower\n", rf.me)
+	defer DPrintf("%d stops actAsFollower\n", rf.me)
 
 	for {
+		rf.mu.Lock()
+		if rf.status != follower || rf.currentTerm != term {
+			rf.mu.Unlock()
+			return
+		}
 		select {
 		case <-rf.timer.C:
 			rf.convertToCandidate()
+			rf.mu.Unlock()
 			return
 		default:
-			if !rf.checkStatus(follower) {
-				return
-			}
-			takeNap()
 		}
+		rf.mu.Unlock()
+		takeNap()
 	}
 }
 
 // actAsCandidate follows rules that are for candidates,
 // as specified in figure 2 of the original paper.
 // It assumes the caller has required the mutex.
-func (rf *Raft) actAsCandidate() {
+func (rf *Raft) actAsCandidate(term int32) {
 	// DPrintf("%d starts actAsCandidate\n", rf.me)
 	// defer DPrintf("%d stops actAsCandidate\n", rf.me)
 
 	for {
+		rf.mu.Lock()
+		if rf.status != candidate || rf.currentTerm != term {
+			rf.mu.Unlock()
+			return
+		}
 		select {
 		case reply := <-rf.requestVoteReplies:
-			if reply.Term > rf.getTerm() {
+			if reply.Term > rf.currentTerm {
 				rf.convertToFollower(reply.Term, true)
+				rf.mu.Unlock()
+				return
 			}
 			if reply.Term == rf.getTerm() && reply.VoteGranted {
 				rf.numGrantedVotes++
 				if 2*rf.numGrantedVotes > len(rf.peers) {
-					rf.status = leader
-					rf.sendAllHeartbeatsWithRetries()
+					rf.convertToLeader()
+					rf.mu.Unlock()
 					return
 				}
 			}
 		case <-rf.timer.C:
 			rf.convertToCandidate()
+			rf.mu.Unlock()
+			return
 		default:
-			if !rf.checkStatus(candidate) {
-				return
-			}
-			takeNap()
 		}
+		rf.mu.Unlock()
+		takeNap()
 	}
 }
 
 // actAsLeader follows rules that are for leader,
 // as specified in figure 2 of the original paper.
 // It assumes the caller has required the mutex.
-func (rf *Raft) actAsLeader() {
-	// DPrintf("%d starts actAsLeader\n", rf.me)
-	// defer DPrintf("%d stops actAsLeader\n", rf.me)
-
-	go func() {
-		for rf.checkStatus(leader) {
-			rf.sendAllHeartbeatsWithRetries()
-			time.Sleep(rf.heartbeatInterval)
-		}
-	}()
+func (rf *Raft) actAsLeader(term int32) {
+	DPrintf("%d starts actAsLeader\n", rf.me)
+	defer DPrintf("%d stops actAsLeader\n", rf.me)
 
 	for {
+		rf.mu.Lock()
+		if rf.status != leader || rf.currentTerm != term {
+			rf.mu.Unlock()
+			return
+		}
 		select {
 		case reply := <-rf.appendEntriesReplies:
-			if reply.Term > rf.getTerm() {
+			if reply.Term > rf.currentTerm {
 				rf.convertToFollower(reply.Term, true)
+				rf.mu.Unlock()
+				return
 			}
 			if reply.Term == rf.getTerm() {
 				//TODO
@@ -148,10 +188,12 @@ func (rf *Raft) actAsLeader() {
 			}
 		default:
 			if !rf.checkStatus(leader) {
+				rf.mu.Unlock()
 				return
 			}
-			takeNap()
 		}
+		rf.mu.Unlock()
+		takeNap()
 	}
 }
 

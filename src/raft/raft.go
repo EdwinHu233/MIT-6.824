@@ -320,13 +320,17 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
 	go func() {
 		for !rf.killed() {
-			switch atomic.LoadInt32(&rf.status) {
+			rf.mu.RLock()
+			status := rf.status
+			term := rf.currentTerm
+			rf.mu.RUnlock()
+			switch status {
 			case follower:
-				rf.actAsFollower()
+				rf.actAsFollower(term)
 			case candidate:
-				rf.actAsCandidate()
+				rf.actAsCandidate(term)
 			case leader:
-				rf.actAsLeader()
+				rf.actAsLeader(term)
 			}
 		}
 	}()

@@ -2,12 +2,10 @@ package raft
 
 import (
 	"log"
-	"sync"
-	"time"
 )
 
 // Debugging
-const Debug = 1
+const Debug = 0
 
 func DPrintf(format string, a ...interface{}) (n int, err error) {
 	if Debug > 0 {
@@ -16,27 +14,27 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 	return
 }
 
-type ConcurrentQueue struct {
-	q []time.Time
-	sync.Mutex
-}
+// type ConcurrentQueue struct {
+// 	q []time.Time
+// 	sync.Mutex
+// }
 
-func (cq *ConcurrentQueue) tryPush() bool {
-	cq.Lock()
-	defer cq.Unlock()
+// func (cq *ConcurrentQueue) tryPush() bool {
+// 	cq.Lock()
+// 	defer cq.Unlock()
 
-	for len(cq.q) > 0 {
-		if time.Now().Sub(cq.q[0]) > time.Second {
-			cq.q = cq.q[1:]
-		}
-	}
+// 	for len(cq.q) > 0 {
+// 		if time.Now().Sub(cq.q[0]) > time.Second {
+// 			cq.q = cq.q[1:]
+// 		}
+// 	}
 
-	if len(cq.q) < 10 {
-		cq.q = append(cq.q, time.Now())
-		return true
-	}
-	return false
-}
+// 	if len(cq.q) < 10 {
+// 		cq.q = append(cq.q, time.Now())
+// 		return true
+// 	}
+// 	return false
+// }
 
 // isMoreUpToDate returns true,
 // if peer 'a' has a (strictly) more up-to-date log than peer 'b'.
