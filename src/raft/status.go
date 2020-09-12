@@ -41,22 +41,40 @@ func (rf *Raft) convertToLeader() {
 		Term:     rf.currentTerm,
 		LeaderID: rf.me,
 	}
-	go func(args *AppendEntriesArgs) {
-		for rf.checkStatus(leader) && rf.getTerm() == args.Term {
-			for server := range rf.peers {
-				if server != rf.me {
-					go func(server int, args *AppendEntriesArgs) {
-						reply := &AppendEntriesReply{}
+
+	go func() {
+		const maxRetries int = 3
+		const retryDelay time.Duration = 200 * time.Microsecond
+
+		for {
+			rf.mu.RLock()
+			checkStatus := rf.status == leader && rf.currentTerm == args.Term
+			rf.mu.RUnlock()
+			if !checkStatus {
+				return
+			}
+
+			// send heartbeats to other peers in one interval
+			for i := range rf.peers {
+				if i == rf.me {
+					continue
+				}
+				go func(server int) {
+					reply := &AppendEntriesReply{}
+					for i := 0; i < maxRetries; i++ {
 						ok := rf.sendAppendEntries(server, args, reply)
 						if ok {
 							rf.appendEntriesReplies <- *reply
+							return
 						}
-					}(server, args)
-				}
+						time.Sleep(retryDelay)
+					}
+				}(i)
 			}
+
 			time.Sleep(rf.heartbeatInterval)
 		}
-	}(args)
+	}()
 }
 
 // convertToCandidate converts this peer to candidate,
@@ -79,22 +97,30 @@ func (rf *Raft) convertToCandidate() {
 	rf.resetTimer()
 
 	args := &RequestVoteArgs{
-		Term:         rf.getTerm(),
+		Term:         rf.currentTerm,
 		CandidateID:  rf.me,
 		LastLogIndex: len(rf.log) - 1,
 		LastLogTerm:  rf.log[len(rf.log)-1].Term,
 	}
 
+	const maxRetries int = 100
+	const retryDelay time.Duration = 10 * time.Microsecond
+
 	for i := range rf.peers {
-		if i != rf.me {
-			go func(server int) {
-				reply := &RequestVoteReply{}
-				ok := rf.sendRequestVote(i, args, reply)
+		if i == rf.me {
+			continue
+		}
+		go func(server int) {
+			reply := &RequestVoteReply{}
+			for i := 0; i < maxRetries; i++ {
+				ok := rf.sendRequestVote(server, args, reply)
 				if ok {
 					rf.requestVoteReplies <- *reply
+					return
 				}
-			}(i)
-		}
+				time.Sleep(retryDelay)
+			}
+		}(i)
 	}
 }
 

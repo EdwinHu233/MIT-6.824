@@ -1,8 +1,5 @@
 package raft
 
-// const maxNumRetry int = 5
-// const retryDelay = 50 * time.Microsecond
-
 //
 // example RequestVote RPC arguments structure.
 // field names must start with capital letters!
@@ -236,7 +233,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 
 	// recieving from outdated leader,
 	// return immediately.
-	term := rf.getTerm()
+	term := rf.currentTerm
 	if args.Term < term {
 		reply.Term = term
 		reply.VoteGranted = false
@@ -266,9 +263,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	if voteGranted {
 		reply.VoteGranted = true
 		rf.votedFor = args.CandidateID
-		if rf.status == follower {
-			rf.resetTimer()
-		}
+		rf.resetTimer()
 	} else {
 		reply.VoteGranted = false
 	}
