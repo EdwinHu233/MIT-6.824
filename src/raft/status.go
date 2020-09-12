@@ -208,15 +208,11 @@ func (rf *Raft) actAsLeader(term int32) {
 				rf.mu.Unlock()
 				return
 			}
-			if reply.Term == rf.getTerm() {
+			if reply.Term == rf.currentTerm {
 				//TODO
 				// handle replies from other peers
 			}
 		default:
-			if !rf.checkStatus(leader) {
-				rf.mu.Unlock()
-				return
-			}
 		}
 		rf.mu.Unlock()
 		takeNap()
