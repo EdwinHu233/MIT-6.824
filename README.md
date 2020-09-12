@@ -20,6 +20,19 @@ bash test-mr.sh 2> log
 To clean up:
 
 ```bash
-# stay in src/main
+# still in src/main
 rm log mr-tmp/ mrsequential mrmaster mrworker -r
+```
+
+### Raft
+
+#### 2-A. Leader Election
+
+Source codes are in `src/raft`
+
+To run the test:
+
+```bash
+cd src/main
+go test -run 2A
 ```
