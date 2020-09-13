@@ -2,6 +2,8 @@ package raft
 
 import (
 	"log"
+	"math/rand"
+	"time"
 )
 
 // Debugging
@@ -13,28 +15,6 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 	}
 	return
 }
-
-// type ConcurrentQueue struct {
-// 	q []time.Time
-// 	sync.Mutex
-// }
-
-// func (cq *ConcurrentQueue) tryPush() bool {
-// 	cq.Lock()
-// 	defer cq.Unlock()
-
-// 	for len(cq.q) > 0 {
-// 		if time.Now().Sub(cq.q[0]) > time.Second {
-// 			cq.q = cq.q[1:]
-// 		}
-// 	}
-
-// 	if len(cq.q) < 10 {
-// 		cq.q = append(cq.q, time.Now())
-// 		return true
-// 	}
-// 	return false
-// }
 
 // isMoreUpToDate returns true,
 // if peer 'a' has a (strictly) more up-to-date log than peer 'b'.
@@ -48,6 +28,14 @@ func isMoreUpToDate(termA, indexA, termB, indexB int) bool {
 }
 
 func (rf *Raft) resetTimer() {
-	rf.randomizeTimeout()
-	rf.timer.Reset(rf.electionTimeout)
+	// randomize electionTimeout
+	// electionTimeout is in [150, 300] ms
+	et := rand.Int63n(150) + 150
+	rf.electionTimeout = time.Duration(et) * time.Millisecond
+
+	rf.timerStart = time.Now()
+}
+
+func (rf *Raft) timeout() bool {
+	return time.Now().Sub(rf.timerStart) > rf.electionTimeout
 }

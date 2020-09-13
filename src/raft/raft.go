@@ -62,7 +62,7 @@ const (
 type Raft struct {
 	// mu        sync.Mutex          // Lock to protect shared access to this peer's state
 
-	mu        sync.RWMutex        // Lock to protect shared access to this peer's state
+	mu        sync.Mutex          // Lock to protect shared access to this peer's state
 	peers     []*labrpc.ClientEnd // RPC end points of all peers
 	persister *Persister          // Object to hold this peer's persisted state
 	me        int                 // this peer's index into peers[]
@@ -99,8 +99,8 @@ type Raft struct {
 	// election timeout as described in the paper
 	electionTimeout time.Duration
 
-	// the election timer
-	timer *time.Timer
+	// when the timer starts
+	timerStart time.Time
 
 	// ----------------------------------------
 	// some information needed when leader election
@@ -168,8 +168,9 @@ type Raft struct {
 // return currentTerm and whether this server
 // believes it is the leader.
 func (rf *Raft) GetState() (int, bool) {
-	rf.mu.RLock()
-	defer rf.mu.RUnlock()
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
 	term := rf.currentTerm
 	status := rf.status
 	return int(term), status == leader
@@ -258,24 +259,6 @@ func (rf *Raft) killed() bool {
 	return z == 1
 }
 
-func (rf *Raft) randomizeTimeout() {
-	rand.Seed(time.Now().UnixNano())
-	// electionTimeout = (1.5 ~ 3) * heartbeatInterval
-	magnification := rand.Intn(1500) + 1500
-	rf.electionTimeout = time.Duration(magnification) *
-		rf.heartbeatInterval /
-		time.Duration(1000)
-}
-
-func (rf *Raft) getTerm() int32 {
-	return atomic.LoadInt32(&rf.currentTerm)
-}
-
-func (rf *Raft) checkStatus(status int32) bool {
-	return !rf.killed() &&
-		atomic.LoadInt32(&rf.status) == status
-}
-
 //
 // the service or tester wants to create a Raft server. the ports
 // of all the Raft servers (including this one) are in peers[]. this
@@ -295,16 +278,15 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.me = me
 
 	// Your initialization code here (2A, 2B, 2C).
+	rand.Seed(time.Now().UnixNano())
 
 	rf.status = follower
 	rf.requestVoteReplies = make(chan RequestVoteReply)
 	rf.appendEntriesReplies = make(chan AppendEntriesReply)
 
-	rf.heartbeatInterval = time.Duration(100*(len(peers)-1)) * time.Microsecond
-	// no need to initialize rf.heartbeatQueue and rf.lastHeartbeatTime
+	rf.heartbeatInterval = 50 * time.Millisecond
 
-	rf.randomizeTimeout()
-	rf.timer = time.NewTimer(rf.electionTimeout)
+	rf.resetTimer()
 
 	rf.numGrantedVotes = 0
 
@@ -318,22 +300,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.nextIndex = make([]int, len(peers))
 	rf.matchIndex = make([]int, len(peers))
 
-	go func() {
-		for !rf.killed() {
-			rf.mu.RLock()
-			status := rf.status
-			term := rf.currentTerm
-			rf.mu.RUnlock()
-			switch status {
-			case follower:
-				rf.actAsFollower(term)
-			case candidate:
-				rf.actAsCandidate(term)
-			case leader:
-				rf.actAsLeader(term)
-			}
-		}
-	}()
+	go rf.convertToFollower(1)
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())

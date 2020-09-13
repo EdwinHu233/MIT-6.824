@@ -1,17 +1,11 @@
 package raft
 
 import (
-	"log"
 	"time"
 )
 
-func (rf *Raft) convertToFollower(newTerm int32, resetTimer bool) {
-	// rf.mu.Lock()
-	// defer rf.mu.Unlock()
-
-	if newTerm < rf.currentTerm {
-		log.Fatal("convertToFollower: outdated newTerm")
-	}
+func (rf *Raft) convertToFollower(newTerm int32) {
+	DPrintf("%d convertToFollower\n", rf.me)
 
 	rf.status = follower
 
@@ -20,205 +14,104 @@ func (rf *Raft) convertToFollower(newTerm int32, resetTimer bool) {
 		rf.votedFor = -1
 	}
 
-	if resetTimer {
-		rf.resetTimer()
-	}
-}
+	rf.resetTimer()
 
-// convertToLeader converts this peer to leader,
-// and sends heartbeats to other peers.
-func (rf *Raft) convertToLeader() {
-	// rf.mu.Lock()
-	// defer rf.mu.Unlock()
-
-	if rf.status != candidate {
-		log.Fatalf("convertToLeader: not a candidate")
-	}
-
-	rf.status = leader
-
-	args := &AppendEntriesArgs{
-		Term:     rf.currentTerm,
-		LeaderID: rf.me,
-	}
-
-	go func() {
-		const maxRetries int = 3
-		const retryDelay time.Duration = 200 * time.Microsecond
-
-		for {
-			rf.mu.RLock()
-			checkStatus := rf.status == leader && rf.currentTerm == args.Term
-			rf.mu.RUnlock()
-			if !checkStatus {
-				return
-			}
-
-			// send heartbeats to other peers in one interval
-			for i := range rf.peers {
-				if i == rf.me {
-					continue
-				}
-				go func(server int) {
-					reply := &AppendEntriesReply{}
-					for i := 0; i < maxRetries; i++ {
-						ok := rf.sendAppendEntries(server, args, reply)
-						if ok {
-							rf.appendEntriesReplies <- *reply
-							return
-						}
-						time.Sleep(retryDelay)
-					}
-				}(i)
-			}
-
-			time.Sleep(rf.heartbeatInterval)
-		}
-	}()
+	go rf.electionLoop()
 }
 
 // convertToCandidate converts this peer to candidate,
 // and starts a new election.
 // It assumes the caller has required the mutex.
 func (rf *Raft) convertToCandidate() {
-	// DPrintf("%d starts convertToCandidate\n", rf.me)
-	// defer DPrintf("%d stops convertToCandidate\n", rf.me)
-
-	// rf.mu.Lock()
-	// defer rf.mu.Unlock()
+	DPrintf("%d convertToCandidate\n", rf.me)
 
 	rf.status = candidate
 
 	rf.currentTerm += 1
-
 	rf.votedFor = rf.me
 	rf.numGrantedVotes = 1
 
 	rf.resetTimer()
+}
 
-	args := &RequestVoteArgs{
-		Term:         rf.currentTerm,
-		CandidateID:  rf.me,
-		LastLogIndex: len(rf.log) - 1,
-		LastLogTerm:  rf.log[len(rf.log)-1].Term,
-	}
+// convertToLeader converts this peer to leader,
+// and sends heartbeats to other peers.
+func (rf *Raft) convertToLeader() {
+	DPrintf("%d convertToLeader\n", rf.me)
 
-	const maxRetries int = 100
-	const retryDelay time.Duration = 10 * time.Microsecond
+	rf.status = leader
 
-	for i := range rf.peers {
-		if i == rf.me {
-			continue
+	go rf.pingLoop()
+}
+
+func (rf *Raft) electionLoop() {
+	for !rf.killed() {
+		rf.mu.Lock()
+
+		if rf.status == leader {
+			rf.mu.Unlock()
+			return
 		}
-		go func(server int) {
-			reply := &RequestVoteReply{}
-			for i := 0; i < maxRetries; i++ {
-				ok := rf.sendRequestVote(server, args, reply)
+
+		// start new election,
+		// collect votes from other peers
+		if rf.timeout() {
+			rf.resetTimer()
+			rf.convertToCandidate()
+
+			args := &RequestVoteArgs{
+				Term:         rf.currentTerm,
+				CandidateID:  rf.me,
+				LastLogIndex: len(rf.log) - 1,
+				LastLogTerm:  rf.log[len(rf.log)-1].Term,
+			}
+			for i := range rf.peers {
+				if i == rf.me {
+					continue
+				}
+				go func(server int) {
+					reply := &RequestVoteReply{}
+					ok := rf.sendRequestVote(server, args, reply)
+					if ok {
+						rf.handleRequestVoteReply(args, reply)
+					}
+				}(i)
+			}
+		}
+
+		rf.mu.Unlock()
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+func (rf *Raft) pingLoop() {
+	for !rf.killed() {
+		rf.mu.Lock()
+
+		if rf.status != leader {
+			rf.mu.Unlock()
+			return
+		}
+
+		args := &AppendEntriesArgs{
+			Term:     rf.currentTerm,
+			LeaderID: rf.me,
+		}
+
+		for i := range rf.peers {
+			if i == rf.me {
+				continue
+			}
+			go func(server int) {
+				reply := &AppendEntriesReply{}
+				ok := rf.sendAppendEntries(server, args, reply)
 				if ok {
-					rf.requestVoteReplies <- *reply
-					return
+					rf.handleAppendEntriesReply(args, reply)
 				}
-				time.Sleep(retryDelay)
-			}
-		}(i)
-	}
-}
-
-// actAsFollower follows the rules that are for followers,
-// as specified in figure 2 of the original paper.
-// It assumes the caller has required the mutex.
-func (rf *Raft) actAsFollower(term int32) {
-	DPrintf("%d starts actAsFollower\n", rf.me)
-	defer DPrintf("%d stops actAsFollower\n", rf.me)
-
-	for {
-		rf.mu.Lock()
-		if rf.status != follower || rf.currentTerm != term {
-			rf.mu.Unlock()
-			return
+			}(i)
 		}
-		select {
-		case <-rf.timer.C:
-			rf.convertToCandidate()
-			rf.mu.Unlock()
-			return
-		default:
-		}
+
 		rf.mu.Unlock()
-		takeNap()
+		time.Sleep(rf.heartbeatInterval)
 	}
-}
-
-// actAsCandidate follows rules that are for candidates,
-// as specified in figure 2 of the original paper.
-// It assumes the caller has required the mutex.
-func (rf *Raft) actAsCandidate(term int32) {
-	// DPrintf("%d starts actAsCandidate\n", rf.me)
-	// defer DPrintf("%d stops actAsCandidate\n", rf.me)
-
-	for {
-		rf.mu.Lock()
-		if rf.status != candidate || rf.currentTerm != term {
-			rf.mu.Unlock()
-			return
-		}
-		select {
-		case reply := <-rf.requestVoteReplies:
-			if reply.Term > rf.currentTerm {
-				rf.convertToFollower(reply.Term, true)
-				rf.mu.Unlock()
-				return
-			}
-			if reply.Term == rf.getTerm() && reply.VoteGranted {
-				rf.numGrantedVotes++
-				if 2*rf.numGrantedVotes > len(rf.peers) {
-					rf.convertToLeader()
-					rf.mu.Unlock()
-					return
-				}
-			}
-		case <-rf.timer.C:
-			rf.convertToCandidate()
-			rf.mu.Unlock()
-			return
-		default:
-		}
-		rf.mu.Unlock()
-		takeNap()
-	}
-}
-
-// actAsLeader follows rules that are for leader,
-// as specified in figure 2 of the original paper.
-// It assumes the caller has required the mutex.
-func (rf *Raft) actAsLeader(term int32) {
-	DPrintf("%d starts actAsLeader\n", rf.me)
-	defer DPrintf("%d stops actAsLeader\n", rf.me)
-
-	for {
-		rf.mu.Lock()
-		if rf.status != leader || rf.currentTerm != term {
-			rf.mu.Unlock()
-			return
-		}
-		select {
-		case reply := <-rf.appendEntriesReplies:
-			if reply.Term > rf.currentTerm {
-				rf.convertToFollower(reply.Term, true)
-				rf.mu.Unlock()
-				return
-			}
-			if reply.Term == rf.currentTerm {
-				//TODO
-				// handle replies from other peers
-			}
-		default:
-		}
-		rf.mu.Unlock()
-		takeNap()
-	}
-}
-
-func takeNap() {
-	time.Sleep(5 * time.Microsecond)
 }

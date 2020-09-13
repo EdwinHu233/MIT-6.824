@@ -67,158 +67,14 @@ type AppendEntriesReply struct {
 //
 
 func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *RequestVoteReply) bool {
-	// DPrintf("%d starts sendRequestVote to %d\n", rf.me, server)
-	// defer DPrintf("%d stops sendRequestVote to %d\n", rf.me, server)
-
 	ok := rf.peers[server].Call("Raft.RequestVote", args, reply)
 	return ok
 }
 
 func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
-	// DPrintf("%d starts sendAppendEntries\n", rf.me)
-	// defer DPrintf("%d stops sendAppendEntries\n", rf.me)
-
 	ok := rf.peers[server].Call("Raft.AppendEntries", args, reply)
 	return ok
 }
-
-// // sendAppendEntriesWithRetries send AppendEntries RPC to one peer,
-// // possibly with a few retries.
-// // It doesn't assume the caller has required mutex.
-// func (rf *Raft) sendRequestVoteWithRetries(server int, args *RequestVoteArgs, reply *RequestVoteReply) bool {
-// 	// DPrintf("%d starts sendRequestVoteWithRetries\n", rf.me)
-// 	// defer DPrintf("%d stops sendRequestVoteWithRetries\n", rf.me)
-// 	for i := 0; i < maxNumRetry; i++ {
-
-// 		rf.mu.Lock()
-// 		if rf.status != candidate ||
-// 			rf.currentTerm != args.Term {
-// 			// This peer's states have changed. No need to send.
-// 			rf.mu.Unlock()
-// 			return false
-// 		}
-// 		ok := rf.sendRequestVote(server, args, reply)
-// 		rf.mu.Unlock()
-
-// 		if ok {
-// 			DPrintf("%d starts to send on rf.requestVoteReplies\n", rf.me)
-// 			rf.requestVoteReplies <- *reply
-// 			DPrintf("%d stops to send on rf.requestVoteReplies\n", rf.me)
-// 			return true
-// 		}
-// 		time.Sleep(retryDelay)
-// 	}
-// 	return false
-// }
-
-// // sendAppendEntriesWithRetries send AppendEntries RPC to one peer,
-// // possibly with a few retries.
-// // It doesn't assume the caller has required mutex.
-// func (rf *Raft) sendAppendEntriesWithRetries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
-// 	for i := 0; i < maxNumRetry; i++ {
-
-// 		rf.mu.Lock()
-// 		if rf.status != leader ||
-// 			rf.currentTerm != args.Term {
-// 			// This peer's states have changed. No need to send.
-// 			rf.mu.Unlock()
-// 			return false
-// 		}
-// 		ok := rf.sendAppendEntries(server, args, reply)
-// 		rf.mu.Unlock()
-
-// 		if ok {
-// 			rf.appendEntriesReplies <- *reply
-// 			return true
-// 		}
-// 		time.Sleep(retryDelay)
-// 	}
-// 	return false
-// }
-
-// // sendHeartbeatWithRetries send heartbeat to one peer,
-// // possibly with a few retries.
-// // It doesn't assume the caller has required mutex.
-// func (rf *Raft) sendHeartbeatWithRetries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
-// 	for i := 0; i < maxNumRetry; i++ {
-
-// 		// This peer's states have changed. No need to send.
-// 		if rf.status != leader ||
-// 			rf.currentTerm != args.Term {
-// 			return false
-// 		}
-
-// 		if rf.sendAppendEntries(server, args, reply) {
-// 			rf.appendEntriesReplies <- *reply
-// 			return true
-// 		}
-
-// 		time.Sleep(retryDelay)
-// 	}
-// 	return false
-// }
-
-// // sendAllHeartbeatsWithRetries sends heartbeats to other peers,
-// // and starts a new heartbeat interval.
-// // It assumes the caller has required the mutex.
-// func (rf *Raft) sendAllHeartbeatsWithRetries() {
-// 	if rf.status != leader {
-// 		log.Fatal("sendAllHeartbeat: not a leader")
-// 	}
-// 	for i := range rf.peers {
-// 		if i != rf.me {
-// 			args := &AppendEntriesArgs{
-// 				Term:     rf.currentTerm,
-// 				LeaderID: rf.me,
-// 			}
-// 			reply := &AppendEntriesReply{}
-// 			go func(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) {
-// 				rf.sendHeartbeatWithRetries(server, args, reply)
-// 			}(i, args, reply)
-// 		}
-// 	}
-// }
-
-// // collectRequestVoteReplies drains rf.requestVoteReplies,
-// // add granted votes to rf.numGrantedVotes,
-// // and can possibly convert this peer back to follower.
-// func (rf *Raft) collectRequestVoteReplies() {
-// 	for {
-// 		select {
-// 		case reply := <-rf.requestVoteReplies:
-// 			if reply.Term > rf.currentTerm {
-// 				rf.convertToFollower(reply.Term, true)
-// 			}
-// 			if reply.Term == rf.currentTerm {
-// 				if reply.VoteGranted {
-// 					rf.numGrantedVotes++
-// 				}
-// 			}
-// 		default:
-// 			return
-// 		}
-// 	}
-// }
-
-// // collectAppendEntriesReplies drains rf.appendEntriesReplies,
-// // and can possibly convert this peer back to follower.
-// func (rf *Raft) collectAppendEntriesReplies() {
-// 	for {
-// 		select {
-// 		case reply := <-rf.appendEntriesReplies:
-// 			if reply.Term > rf.currentTerm {
-// 				rf.convertToFollower(reply.Term, true)
-// 			}
-// 			if reply.Term == rf.currentTerm &&
-// 				rf.status == leader {
-// 				// TODO
-// 				// leader should do something when recieving replies from other peers
-// 			}
-// 		default:
-// 			return
-// 		}
-// 	}
-// }
 
 //
 // example RequestVote RPC handler.
@@ -231,18 +87,19 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
-	// recieving from outdated leader,
-	// return immediately.
-	term := rf.currentTerm
-	if args.Term < term {
-		reply.Term = term
+	// recieves from outdated candidate,
+	// reject and return immediately.
+	if args.Term < rf.currentTerm {
+		reply.Term = rf.currentTerm
 		reply.VoteGranted = false
 		return
 	}
 
-	// recieving from a newer term
-	if args.Term > term {
-		rf.convertToFollower(args.Term, rf.status != follower)
+	// recieving from a newer term,
+	// convert back to follower.
+	if args.Term > rf.currentTerm &&
+		rf.status != follower {
+		rf.convertToFollower(args.Term)
 	}
 
 	// check if this peer should grant vote.
@@ -286,16 +143,9 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		return
 	}
 
-	switch rf.status {
-	case follower:
-		rf.convertToFollower(args.Term, true)
-	case candidate:
-		rf.convertToFollower(args.Term, true)
-	case leader:
-		if args.Term > rf.currentTerm {
-			rf.convertToFollower(args.Term, true)
-		}
-	}
+	// recieving from current leader,
+	// convert back to follower.
+	rf.convertToFollower(args.Term)
 
 	// TODO
 	// return false if log doesn't contain an entry at PrevLogIndex whose term matches PrevLogTerm
@@ -311,4 +161,55 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	// TODO
 	// if leaderCommit > commitIndex,
 	// set commitIndex = min(LeaderCommit, index of the last new entry)
+}
+
+func (rf *Raft) handleAppendEntriesReply(args *AppendEntriesArgs, reply *AppendEntriesReply) {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
+	// reply is outdated
+	// (this peer's states have changed after sending request)
+	// discard it
+	if rf.status != leader ||
+		rf.currentTerm != args.Term {
+		return
+	}
+
+	// reply is not outdated
+	// handle it the right way
+
+	if reply.Term > rf.currentTerm {
+		rf.convertToFollower(reply.Term)
+		return
+	}
+
+	// TODO rules of log replication
+}
+
+func (rf *Raft) handleRequestVoteReply(args *RequestVoteArgs, reply *RequestVoteReply) {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
+	// reply is outdated
+	// (this peer's states have changed after sending request)
+	// discard it
+	if rf.status != candidate ||
+		rf.currentTerm != args.Term {
+		return
+	}
+
+	// reply is not outdated
+	// handle it the right way
+
+	if reply.Term > rf.currentTerm {
+		rf.convertToFollower(reply.Term)
+		return
+	}
+
+	if reply.VoteGranted {
+		rf.numGrantedVotes++
+		if rf.numGrantedVotes*2 > len(rf.peers) {
+			rf.convertToLeader()
+		}
+	}
 }
