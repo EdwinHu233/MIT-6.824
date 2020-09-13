@@ -47,7 +47,7 @@ type ApplyMsg struct {
 
 type LogEntry struct {
 	Command interface{}
-	Term    int
+	Term    int32
 }
 
 const (
@@ -229,13 +229,22 @@ func (rf *Raft) readPersist(data []byte) {
 // the leader.
 //
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
-	index := -1
-	term := -1
-	isLeader := true
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
 
-	// Your code here (2B).
+	if rf.killed() || rf.status != leader {
+		return -1, -1, false
+	}
 
-	return index, term, isLeader
+	index := len(rf.log)
+	term := rf.currentTerm
+
+	rf.log = append(rf.log, LogEntry{
+		Command: command,
+		Term:    term,
+	})
+
+	return index, int(term), true
 }
 
 //

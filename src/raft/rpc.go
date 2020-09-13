@@ -9,7 +9,7 @@ type RequestVoteArgs struct {
 	Term         int32
 	CandidateID  int
 	LastLogIndex int
-	LastLogTerm  int
+	LastLogTerm  int32
 }
 
 //
@@ -26,7 +26,7 @@ type AppendEntriesArgs struct {
 	Term         int32
 	LeaderID     int
 	PrevLogIndex int
-	PrevLogTerm  int
+	PrevLogTerm  int32
 	Entries      []LogEntry
 	LeaderCommit int
 }
@@ -149,21 +149,42 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 	// TODO
 	// return false if log doesn't contain an entry at PrevLogIndex whose term matches PrevLogTerm
+	if len(rf.log) <= args.PrevLogIndex ||
+		rf.log[args.PrevLogIndex].Term != args.PrevLogTerm {
+		reply.Success = false
+		reply.Term = rf.currentTerm
+		return
+	}
 
 	// TODO
-	// if an existing entry conflicts with a new one
+	// 1. if an existing entry conflicts with a new one
 	// (same index but different terms),
 	// delete the the existing entry and all that follow it
-
-	// TODO
-	// append any new entries not already in the log
+	// 2. append any new entries not already in the log
+	for i := range args.Entries {
+		j := args.PrevLogIndex + 1 + i
+		if j == len(rf.log) ||
+			rf.log[j].Term != args.Entries[i].Term {
+			rf.log = rf.log[:j]
+			rf.log = append(rf.log, args.Entries[i:]...)
+			break
+		}
+	}
 
 	// TODO
 	// if leaderCommit > commitIndex,
 	// set commitIndex = min(LeaderCommit, index of the last new entry)
+	if args.LeaderCommit > rf.commitIndex {
+		lastLogIndex := len(rf.log) - 1
+		if args.LeaderCommit < lastLogIndex {
+			rf.commitIndex = args.LeaderCommit
+		} else {
+			rf.commitIndex = lastLogIndex
+		}
+	}
 }
 
-func (rf *Raft) handleAppendEntriesReply(args *AppendEntriesArgs, reply *AppendEntriesReply) {
+func (rf *Raft) handleAppendEntriesReply(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
@@ -184,6 +205,14 @@ func (rf *Raft) handleAppendEntriesReply(args *AppendEntriesArgs, reply *AppendE
 	}
 
 	// TODO rules of log replication
+
+	if reply.Success {
+		match := args.PrevLogIndex + len(args.Entries)
+		rf.matchIndex[server] = match
+		rf.nextIndex[server] = match + 1
+	} else {
+		rf.nextIndex[server] = args.PrevLogIndex
+	}
 }
 
 func (rf *Raft) handleRequestVoteReply(args *RequestVoteArgs, reply *RequestVoteReply) {

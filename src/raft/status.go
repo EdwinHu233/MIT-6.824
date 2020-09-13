@@ -1,6 +1,7 @@
 package raft
 
 import (
+	"sort"
 	"time"
 )
 
@@ -40,6 +41,10 @@ func (rf *Raft) convertToLeader() {
 	DPrintf("%d convertToLeader\n", rf.me)
 
 	rf.status = leader
+	for i := range rf.peers {
+		rf.nextIndex[i] = len(rf.log)
+		rf.matchIndex[i] = 0
+	}
 
 	go rf.pingLoop()
 }
@@ -80,7 +85,7 @@ func (rf *Raft) electionLoop() {
 		}
 
 		rf.mu.Unlock()
-		time.Sleep(5 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
@@ -106,12 +111,57 @@ func (rf *Raft) pingLoop() {
 				reply := &AppendEntriesReply{}
 				ok := rf.sendAppendEntries(server, args, reply)
 				if ok {
-					rf.handleAppendEntriesReply(args, reply)
+					rf.handleAppendEntriesReply(server, args, reply)
 				}
 			}(i)
 		}
 
 		rf.mu.Unlock()
 		time.Sleep(rf.heartbeatInterval)
+	}
+}
+
+func (rf *Raft) logReplicationLoop() {
+	for !rf.killed() {
+		rf.mu.Lock()
+
+		if rf.status != leader {
+			rf.mu.Unlock()
+			return
+		}
+
+		lastLogIndex := len(rf.log) - 1
+		for i := range rf.peers {
+			if lastLogIndex >= rf.nextIndex[i] {
+				go func(server int) {
+					nextIndex := rf.nextIndex[server]
+					prevIndex := nextIndex - 1
+					args := &AppendEntriesArgs{
+						Term:         rf.currentTerm,
+						LeaderID:     rf.me,
+						PrevLogIndex: prevIndex,
+						PrevLogTerm:  rf.log[prevIndex].Term,
+						Entries:      rf.log[nextIndex:],
+						LeaderCommit: rf.commitIndex,
+					}
+					reply := &AppendEntriesReply{}
+					ok := rf.sendAppendEntries(server, args, reply)
+					if ok {
+						rf.handleAppendEntriesReply(server, args, reply)
+					}
+				}(i)
+			}
+		}
+
+		matches := make([]int, len(rf.matchIndex))
+		for i := range matches {
+			matches[i] = rf.matchIndex[i]
+		}
+		sort.Ints(matches)
+		for n := rf.commitIndex + 1; n <= matches[len(matches)/2]; n++ {
+			if rf.log[n].Term == rf.currentTerm {
+				rf.commitIndex = n
+			}
+		}
 	}
 }

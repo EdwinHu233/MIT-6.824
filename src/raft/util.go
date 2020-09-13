@@ -20,7 +20,7 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 // if peer 'a' has a (strictly) more up-to-date log than peer 'b'.
 // termA and indexA are from the last log entry of 'a'.
 // termB and indexB are from the last log entry of 'b'.
-func isMoreUpToDate(termA, indexA, termB, indexB int) bool {
+func isMoreUpToDate(termA int32, indexA int, termB int32, indexB int) bool {
 	if termA != termB {
 		return termA > termB
 	}
