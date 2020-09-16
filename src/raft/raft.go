@@ -148,23 +148,6 @@ type Raft struct {
 	matchIndex []int
 }
 
-// func (rf *Raft) getTermStatus() (int32, int32) {
-// 	x := atomic.LoadInt64(&rf.termStatus)
-// 	term := int32(x >> 32)
-// 	status := int32(x)
-// 	return term, status
-// }
-
-// func (rf *Raft) checkStatus(targetStatus int32) bool {
-// 	_, status := rf.getTermStatus()
-// 	return status == targetStatus
-// }
-
-// func (rf *Raft) setTermStatus(term, status int32) {
-// 	x := (int64(term) << 32) | int64(status)
-// 	atomic.StoreInt64(&rf.termStatus, x)
-// }
-
 // return currentTerm and whether this server
 // believes it is the leader.
 func (rf *Raft) GetState() (int, bool) {

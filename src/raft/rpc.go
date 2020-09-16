@@ -1,5 +1,7 @@
 package raft
 
+import "sort"
+
 //
 // example RequestVote RPC arguments structure.
 // field names must start with capital letters!
@@ -135,11 +137,12 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
+	reply.Term = rf.currentTerm
+
 	// recieving from outdated leader,
 	// return immediately
 	if args.Term < rf.currentTerm {
 		reply.Success = false
-		reply.Term = rf.currentTerm
 		return
 	}
 
@@ -152,24 +155,26 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	if len(rf.log) <= args.PrevLogIndex ||
 		rf.log[args.PrevLogIndex].Term != args.PrevLogTerm {
 		reply.Success = false
-		reply.Term = rf.currentTerm
 		return
 	}
+
+	reply.Success = true
 
 	// TODO
 	// 1. if an existing entry conflicts with a new one
 	// (same index but different terms),
 	// delete the the existing entry and all that follow it
 	// 2. append any new entries not already in the log
-	for i := range args.Entries {
+	i := 0
+	for ; i < len(args.Entries); i++ {
 		j := args.PrevLogIndex + 1 + i
-		if j == len(rf.log) ||
+		if j >= len(rf.log) ||
 			rf.log[j].Term != args.Entries[i].Term {
-			rf.log = rf.log[:j]
-			rf.log = append(rf.log, args.Entries[i:]...)
 			break
 		}
 	}
+	j := args.PrevLogIndex + 1 + i
+	rf.log = append(rf.log[:j], args.Entries[i:]...)
 
 	// TODO
 	// if leaderCommit > commitIndex,
@@ -210,6 +215,16 @@ func (rf *Raft) handleAppendEntriesReply(server int, args *AppendEntriesArgs, re
 		match := args.PrevLogIndex + len(args.Entries)
 		rf.matchIndex[server] = match
 		rf.nextIndex[server] = match + 1
+		matches := make([]int, len(rf.matchIndex))
+		for i := range matches {
+			matches[i] = rf.matchIndex[i]
+		}
+		sort.Ints(matches)
+		for n := rf.commitIndex + 1; n <= matches[len(matches)/2]; n++ {
+			if rf.log[n].Term == rf.currentTerm {
+				rf.commitIndex = n
+			}
+		}
 	} else {
 		rf.nextIndex[server] = args.PrevLogIndex
 	}

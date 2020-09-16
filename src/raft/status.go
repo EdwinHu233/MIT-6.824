@@ -1,7 +1,7 @@
 package raft
 
 import (
-	"sort"
+	"sync"
 	"time"
 )
 
@@ -46,7 +46,8 @@ func (rf *Raft) convertToLeader() {
 		rf.matchIndex[i] = 0
 	}
 
-	go rf.pingLoop()
+	go rf.heartbeatLoop()
+	go rf.logReplicationLoop()
 }
 
 func (rf *Raft) electionLoop() {
@@ -61,7 +62,6 @@ func (rf *Raft) electionLoop() {
 		// start new election,
 		// collect votes from other peers
 		if rf.timeout() {
-			rf.resetTimer()
 			rf.convertToCandidate()
 
 			args := &RequestVoteArgs{
@@ -89,7 +89,7 @@ func (rf *Raft) electionLoop() {
 	}
 }
 
-func (rf *Raft) pingLoop() {
+func (rf *Raft) heartbeatLoop() {
 	for !rf.killed() {
 		rf.mu.Lock()
 
@@ -98,9 +98,14 @@ func (rf *Raft) pingLoop() {
 			return
 		}
 
+		prevIndex := len(rf.log) - 1
 		args := &AppendEntriesArgs{
-			Term:     rf.currentTerm,
-			LeaderID: rf.me,
+			Term:         rf.currentTerm,
+			LeaderID:     rf.me,
+			PrevLogIndex: prevIndex,
+			PrevLogTerm:  rf.log[prevIndex].Term,
+			Entries:      nil,
+			LeaderCommit: rf.commitIndex,
 		}
 
 		for i := range rf.peers {
@@ -130,9 +135,16 @@ func (rf *Raft) logReplicationLoop() {
 			return
 		}
 
+		var waitSending sync.WaitGroup
+
+		// log.Printf("leader's nextIndex:\n%v\n", rf.nextIndex)
+
 		lastLogIndex := len(rf.log) - 1
 		for i := range rf.peers {
 			if lastLogIndex >= rf.nextIndex[i] {
+
+				waitSending.Add(1)
+
 				go func(server int) {
 					nextIndex := rf.nextIndex[server]
 					prevIndex := nextIndex - 1
@@ -144,6 +156,9 @@ func (rf *Raft) logReplicationLoop() {
 						Entries:      rf.log[nextIndex:],
 						LeaderCommit: rf.commitIndex,
 					}
+
+					waitSending.Done()
+
 					reply := &AppendEntriesReply{}
 					ok := rf.sendAppendEntries(server, args, reply)
 					if ok {
@@ -153,15 +168,9 @@ func (rf *Raft) logReplicationLoop() {
 			}
 		}
 
-		matches := make([]int, len(rf.matchIndex))
-		for i := range matches {
-			matches[i] = rf.matchIndex[i]
-		}
-		sort.Ints(matches)
-		for n := rf.commitIndex + 1; n <= matches[len(matches)/2]; n++ {
-			if rf.log[n].Term == rf.currentTerm {
-				rf.commitIndex = n
-			}
-		}
+		waitSending.Wait()
+
+		rf.mu.Unlock()
+		time.Sleep(5 * time.Millisecond)
 	}
 }
