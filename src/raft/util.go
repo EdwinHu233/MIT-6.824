@@ -16,6 +16,13 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 	return
 }
 
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 // isMoreUpToDate returns true,
 // if peer 'a' has a (strictly) more up-to-date log than peer 'b'.
 // termA and indexA are from the last log entry of 'a'.

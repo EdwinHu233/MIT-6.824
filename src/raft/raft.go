@@ -212,6 +212,8 @@ func (rf *Raft) readPersist(data []byte) {
 // the leader.
 //
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
+	DPrintf("%v: recieve from client\n", rf.me)
+
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
@@ -222,10 +224,13 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	index := len(rf.log)
 	term := rf.currentTerm
 
+	DPrintf("leader %v: recieve from client, index=%v, term=%v\n", rf.me, index, term)
+
 	rf.log = append(rf.log, LogEntry{
 		Command: command,
 		Term:    term,
 	})
+	rf.matchIndex[rf.me] = index
 
 	return index, int(term), true
 }
@@ -292,7 +297,8 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.nextIndex = make([]int, len(peers))
 	rf.matchIndex = make([]int, len(peers))
 
-	go rf.convertToFollower(1)
+	go rf.convertToFollower(0)
+	go rf.applyLoop(applyCh)
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())

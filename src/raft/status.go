@@ -141,6 +141,9 @@ func (rf *Raft) logReplicationLoop() {
 
 		lastLogIndex := len(rf.log) - 1
 		for i := range rf.peers {
+			if i == rf.me {
+				continue
+			}
 			if lastLogIndex >= rf.nextIndex[i] {
 
 				waitSending.Add(1)
@@ -171,6 +174,25 @@ func (rf *Raft) logReplicationLoop() {
 		waitSending.Wait()
 
 		rf.mu.Unlock()
-		time.Sleep(5 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func (rf *Raft) applyLoop(applyCh chan ApplyMsg) {
+	for !rf.killed() {
+		rf.mu.Lock()
+		if rf.lastApplied < rf.commitIndex {
+			rf.lastApplied++
+			msg := ApplyMsg{
+				CommandValid: true,
+				Command:      rf.log[rf.lastApplied].Command,
+				CommandIndex: rf.lastApplied,
+			}
+			go func(msg ApplyMsg) {
+				applyCh <- msg
+			}(msg)
+		}
+		rf.mu.Unlock()
+		time.Sleep(10 * time.Millisecond)
 	}
 }

@@ -137,12 +137,11 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
-	reply.Term = rf.currentTerm
-
 	// recieving from outdated leader,
 	// return immediately
 	if args.Term < rf.currentTerm {
 		reply.Success = false
+		reply.Term = rf.currentTerm
 		return
 	}
 
@@ -155,37 +154,38 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	if len(rf.log) <= args.PrevLogIndex ||
 		rf.log[args.PrevLogIndex].Term != args.PrevLogTerm {
 		reply.Success = false
+		reply.Term = rf.currentTerm
 		return
 	}
 
 	reply.Success = true
+	reply.Term = rf.currentTerm
 
 	// TODO
 	// 1. if an existing entry conflicts with a new one
 	// (same index but different terms),
 	// delete the the existing entry and all that follow it
 	// 2. append any new entries not already in the log
-	i := 0
-	for ; i < len(args.Entries); i++ {
-		j := args.PrevLogIndex + 1 + i
-		if j >= len(rf.log) ||
-			rf.log[j].Term != args.Entries[i].Term {
+	i := args.PrevLogIndex + 1
+	end := min(len(rf.log), args.PrevLogIndex+1+len(args.Entries))
+	for ; i < end; i++ {
+		j := i - 1 - args.PrevLogIndex
+		if rf.log[i].Term != args.Entries[j].Term {
 			break
 		}
 	}
-	j := args.PrevLogIndex + 1 + i
-	rf.log = append(rf.log[:j], args.Entries[i:]...)
+	j := i - 1 - args.PrevLogIndex
+	if j < len(args.Entries) {
+		rf.log = append(rf.log[:i], args.Entries[j:]...)
+	}
 
 	// TODO
 	// if leaderCommit > commitIndex,
 	// set commitIndex = min(LeaderCommit, index of the last new entry)
 	if args.LeaderCommit > rf.commitIndex {
-		lastLogIndex := len(rf.log) - 1
-		if args.LeaderCommit < lastLogIndex {
-			rf.commitIndex = args.LeaderCommit
-		} else {
-			rf.commitIndex = lastLogIndex
-		}
+		lastNewEntry := args.PrevLogIndex + 1 + len(args.Entries)
+		rf.commitIndex = min(args.LeaderCommit, lastNewEntry)
+		DPrintf("follower %v: update commitIndex to %v\n", rf.me, rf.commitIndex)
 	}
 }
 
@@ -215,16 +215,48 @@ func (rf *Raft) handleAppendEntriesReply(server int, args *AppendEntriesArgs, re
 		match := args.PrevLogIndex + len(args.Entries)
 		rf.matchIndex[server] = match
 		rf.nextIndex[server] = match + 1
-		matches := make([]int, len(rf.matchIndex))
-		for i := range matches {
-			matches[i] = rf.matchIndex[i]
+		// DPrintf("%v\n", rf.matchIndex)
+
+		// counter all indices
+		indexCounter := make(map[int]int)
+		for _, mi := range rf.matchIndex {
+			indexCounter[mi]++
 		}
-		sort.Ints(matches)
-		for n := rf.commitIndex + 1; n <= matches[len(matches)/2]; n++ {
-			if rf.log[n].Term == rf.currentTerm {
-				rf.commitIndex = n
+		// collect unique indices
+		indices := make([]int, 0, len(indexCounter))
+		for k := range indexCounter {
+			indices = append(indices, k)
+		}
+		// find the greatest index that the majority agrees on
+		sort.Ints(indices)
+		numGreaterEqual := 0
+		i := len(indices) - 1
+		for ; i >= 0; i-- {
+			numGreaterEqual += indexCounter[indices[i]]
+			if numGreaterEqual*2 >= len(rf.peers) {
+				break
 			}
 		}
+		if i >= 0 {
+			for n := indices[i]; n > rf.commitIndex; n-- {
+				if rf.log[n].Term == rf.currentTerm {
+					rf.commitIndex = n
+					DPrintf("leader %v: update commitIndex to %v\n", rf.me, n)
+					return
+				}
+			}
+		}
+
+		// matches := make([]int, len(rf.matchIndex))
+		// for i := range matches {
+		// 	matches[i] = rf.matchIndex[i]
+		// }
+		// sort.Ints(matches)
+		// for n := rf.commitIndex + 1; n <= matches[len(matches)/2]; n++ {
+		// 	if rf.log[n].Term == rf.currentTerm {
+		// 		rf.commitIndex = n
+		// 	}
+		// }
 	} else {
 		rf.nextIndex[server] = args.PrevLogIndex
 	}
