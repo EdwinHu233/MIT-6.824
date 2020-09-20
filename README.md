@@ -6,7 +6,7 @@ Working in progress.
 
 ## Finished Labs
 
-### Map Reduce
+### Lab 1. Map Reduce
 
 Source codes are in `src/mr`.
 
@@ -24,15 +24,24 @@ To clean up:
 rm log mr-tmp/ mrsequential mrmaster mrworker -r
 ```
 
-### Raft
-
-#### 2-A. Leader Election
+### Lab 2. Raft
 
 Source codes are in `src/raft`
+
+#### 2A. Leader Election
 
 To run the test:
 
 ```bash
 cd src/main
 go test -run 2A
+```
+
+#### 2B. Log Prelication
+
+To run the test:
+
+```bash
+cd src/main
+go test -run 2B
 ```
