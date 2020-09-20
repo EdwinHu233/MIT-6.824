@@ -186,7 +186,7 @@ func (cfg *config) start1(i int) {
 				}
 				_, prevok := cfg.logs[i][m.CommandIndex-1]
 				cfg.logs[i][m.CommandIndex] = v
-				DPrintf("tester: know that server has applied: %v\n", v)
+				// DPrintf("tester: know that server has applied: %v\n", v)
 				if m.CommandIndex > cfg.maxIndex {
 					cfg.maxIndex = m.CommandIndex
 				}

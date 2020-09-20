@@ -6,7 +6,7 @@ import (
 )
 
 func (rf *Raft) convertToFollower(newTerm int32) {
-	DPrintf("%d convertToFollower\n", rf.me)
+	// DPrintf("%d convertToFollower\n", rf.me)
 
 	rf.status = follower
 
@@ -24,7 +24,7 @@ func (rf *Raft) convertToFollower(newTerm int32) {
 // and starts a new election.
 // It assumes the caller has required the mutex.
 func (rf *Raft) convertToCandidate() {
-	DPrintf("%d convertToCandidate\n", rf.me)
+	// DPrintf("%d convertToCandidate\n", rf.me)
 
 	rf.status = candidate
 

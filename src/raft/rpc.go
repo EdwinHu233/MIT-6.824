@@ -212,6 +212,7 @@ func (rf *Raft) handleAppendEntriesReply(server int, args *AppendEntriesArgs, re
 	// TODO rules of log replication
 
 	if reply.Success {
+		DPrintf("leader %d: got success AppendEntriesReply from %d\n", rf.me, server)
 		match := args.PrevLogIndex + len(args.Entries)
 		rf.matchIndex[server] = match
 		rf.nextIndex[server] = match + 1
@@ -246,19 +247,9 @@ func (rf *Raft) handleAppendEntriesReply(server int, args *AppendEntriesArgs, re
 				}
 			}
 		}
-
-		// matches := make([]int, len(rf.matchIndex))
-		// for i := range matches {
-		// 	matches[i] = rf.matchIndex[i]
-		// }
-		// sort.Ints(matches)
-		// for n := rf.commitIndex + 1; n <= matches[len(matches)/2]; n++ {
-		// 	if rf.log[n].Term == rf.currentTerm {
-		// 		rf.commitIndex = n
-		// 	}
-		// }
 	} else {
-		rf.nextIndex[server] = args.PrevLogIndex
+		DPrintf("leader %d: got failed AppendEntriesReply from %d; update nextIndex to %d\n", rf.me, server, args.PrevLogIndex)
+		rf.nextIndex[server] = min(rf.nextIndex[server], args.PrevLogIndex)
 	}
 }
 

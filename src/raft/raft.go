@@ -212,7 +212,7 @@ func (rf *Raft) readPersist(data []byte) {
 // the leader.
 //
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
-	DPrintf("%v: recieve from client\n", rf.me)
+	// DPrintf("%v: recieve from client\n", rf.me)
 
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
