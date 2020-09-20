@@ -91,15 +91,15 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 
 	// recieves from outdated candidate,
 	// reject and return immediately.
-	if args.Term < rf.currentTerm {
-		reply.Term = rf.currentTerm
+	if args.Term < rf.CurrentTerm {
+		reply.Term = rf.CurrentTerm
 		reply.VoteGranted = false
 		return
 	}
 
 	// recieving from a newer term,
 	// convert back to follower.
-	if args.Term > rf.currentTerm &&
+	if args.Term > rf.CurrentTerm &&
 		rf.status != follower {
 		rf.convertToFollower(args.Term)
 	}
@@ -107,11 +107,11 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// check if this peer should grant vote.
 	// (computation are local to this function,
 	// doesn't change state yet)
-	selfLastIndex := len(rf.log) - 1
-	selfLastTerm := rf.log[selfLastIndex].Term
+	selfLastIndex := len(rf.Log) - 1
+	selfLastTerm := rf.Log[selfLastIndex].Term
 
 	var voteGranted bool
-	if rf.votedFor >= 0 && rf.votedFor != args.CandidateID {
+	if rf.VotedFor >= 0 && rf.VotedFor != args.CandidateID {
 		voteGranted = false
 	} else if isMoreUpToDate(selfLastTerm, selfLastIndex, args.LastLogTerm, args.LastLogIndex) {
 		voteGranted = false
@@ -121,13 +121,16 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 
 	if voteGranted {
 		reply.VoteGranted = true
-		rf.votedFor = args.CandidateID
+		if rf.VotedFor != args.CandidateID {
+			rf.VotedFor = args.CandidateID
+			rf.persist()
+		}
 		rf.resetTimer()
 	} else {
 		reply.VoteGranted = false
 	}
 
-	reply.Term = rf.currentTerm
+	reply.Term = rf.CurrentTerm
 }
 
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
@@ -139,9 +142,9 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 	// recieving from outdated leader,
 	// return immediately
-	if args.Term < rf.currentTerm {
+	if args.Term < rf.CurrentTerm {
 		reply.Success = false
-		reply.Term = rf.currentTerm
+		reply.Term = rf.CurrentTerm
 		return
 	}
 
@@ -151,15 +154,15 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 	// TODO
 	// return false if log doesn't contain an entry at PrevLogIndex whose term matches PrevLogTerm
-	if len(rf.log) <= args.PrevLogIndex ||
-		rf.log[args.PrevLogIndex].Term != args.PrevLogTerm {
+	if len(rf.Log) <= args.PrevLogIndex ||
+		rf.Log[args.PrevLogIndex].Term != args.PrevLogTerm {
 		reply.Success = false
-		reply.Term = rf.currentTerm
+		reply.Term = rf.CurrentTerm
 		return
 	}
 
 	reply.Success = true
-	reply.Term = rf.currentTerm
+	reply.Term = rf.CurrentTerm
 
 	// TODO
 	// 1. if an existing entry conflicts with a new one
@@ -167,16 +170,17 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	// delete the the existing entry and all that follow it
 	// 2. append any new entries not already in the log
 	i := args.PrevLogIndex + 1
-	end := min(len(rf.log), args.PrevLogIndex+1+len(args.Entries))
+	end := min(len(rf.Log), args.PrevLogIndex+1+len(args.Entries))
 	for ; i < end; i++ {
 		j := i - 1 - args.PrevLogIndex
-		if rf.log[i].Term != args.Entries[j].Term {
+		if rf.Log[i].Term != args.Entries[j].Term {
 			break
 		}
 	}
 	j := i - 1 - args.PrevLogIndex
 	if j < len(args.Entries) {
-		rf.log = append(rf.log[:i], args.Entries[j:]...)
+		rf.Log = append(rf.Log[:i], args.Entries[j:]...)
+		rf.persist()
 	}
 
 	// TODO
@@ -197,14 +201,14 @@ func (rf *Raft) handleAppendEntriesReply(server int, args *AppendEntriesArgs, re
 	// (this peer's states have changed after sending request)
 	// discard it
 	if rf.status != leader ||
-		rf.currentTerm != args.Term {
+		rf.CurrentTerm != args.Term {
 		return
 	}
 
 	// reply is not outdated
 	// handle it the right way
 
-	if reply.Term > rf.currentTerm {
+	if reply.Term > rf.CurrentTerm {
 		rf.convertToFollower(reply.Term)
 		return
 	}
@@ -240,7 +244,7 @@ func (rf *Raft) handleAppendEntriesReply(server int, args *AppendEntriesArgs, re
 		}
 		if i >= 0 {
 			for n := indices[i]; n > rf.commitIndex; n-- {
-				if rf.log[n].Term == rf.currentTerm {
+				if rf.Log[n].Term == rf.CurrentTerm {
 					rf.commitIndex = n
 					DPrintf("leader %v: update commitIndex to %v\n", rf.me, n)
 					return
@@ -261,14 +265,14 @@ func (rf *Raft) handleRequestVoteReply(args *RequestVoteArgs, reply *RequestVote
 	// (this peer's states have changed after sending request)
 	// discard it
 	if rf.status != candidate ||
-		rf.currentTerm != args.Term {
+		rf.CurrentTerm != args.Term {
 		return
 	}
 
 	// reply is not outdated
 	// handle it the right way
 
-	if reply.Term > rf.currentTerm {
+	if reply.Term > rf.CurrentTerm {
 		rf.convertToFollower(reply.Term)
 		return
 	}

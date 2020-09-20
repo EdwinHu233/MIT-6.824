@@ -10,9 +10,10 @@ func (rf *Raft) convertToFollower(newTerm int32) {
 
 	rf.status = follower
 
-	if newTerm > rf.currentTerm {
-		rf.currentTerm = newTerm
-		rf.votedFor = -1
+	if newTerm > rf.CurrentTerm {
+		rf.CurrentTerm = newTerm
+		rf.VotedFor = -1
+		rf.persist()
 	}
 
 	rf.resetTimer()
@@ -28,9 +29,11 @@ func (rf *Raft) convertToCandidate() {
 
 	rf.status = candidate
 
-	rf.currentTerm += 1
-	rf.votedFor = rf.me
+	rf.CurrentTerm += 1
+	rf.VotedFor = rf.me
 	rf.numGrantedVotes = 1
+
+	rf.persist()
 
 	rf.resetTimer()
 }
@@ -42,7 +45,7 @@ func (rf *Raft) convertToLeader() {
 
 	rf.status = leader
 	for i := range rf.peers {
-		rf.nextIndex[i] = len(rf.log)
+		rf.nextIndex[i] = len(rf.Log)
 		rf.matchIndex[i] = 0
 	}
 
@@ -65,10 +68,10 @@ func (rf *Raft) electionLoop() {
 			rf.convertToCandidate()
 
 			args := &RequestVoteArgs{
-				Term:         rf.currentTerm,
+				Term:         rf.CurrentTerm,
 				CandidateID:  rf.me,
-				LastLogIndex: len(rf.log) - 1,
-				LastLogTerm:  rf.log[len(rf.log)-1].Term,
+				LastLogIndex: len(rf.Log) - 1,
+				LastLogTerm:  rf.Log[len(rf.Log)-1].Term,
 			}
 			for i := range rf.peers {
 				if i == rf.me {
@@ -98,12 +101,12 @@ func (rf *Raft) heartbeatLoop() {
 			return
 		}
 
-		prevIndex := len(rf.log) - 1
+		prevIndex := len(rf.Log) - 1
 		args := &AppendEntriesArgs{
-			Term:         rf.currentTerm,
+			Term:         rf.CurrentTerm,
 			LeaderID:     rf.me,
 			PrevLogIndex: prevIndex,
-			PrevLogTerm:  rf.log[prevIndex].Term,
+			PrevLogTerm:  rf.Log[prevIndex].Term,
 			Entries:      nil,
 			LeaderCommit: rf.commitIndex,
 		}
@@ -139,7 +142,7 @@ func (rf *Raft) logReplicationLoop() {
 
 		// log.Printf("leader's nextIndex:\n%v\n", rf.nextIndex)
 
-		lastLogIndex := len(rf.log) - 1
+		lastLogIndex := len(rf.Log) - 1
 		for i := range rf.peers {
 			if i == rf.me {
 				continue
@@ -152,11 +155,11 @@ func (rf *Raft) logReplicationLoop() {
 					nextIndex := rf.nextIndex[server]
 					prevIndex := nextIndex - 1
 					args := &AppendEntriesArgs{
-						Term:         rf.currentTerm,
+						Term:         rf.CurrentTerm,
 						LeaderID:     rf.me,
 						PrevLogIndex: prevIndex,
-						PrevLogTerm:  rf.log[prevIndex].Term,
-						Entries:      rf.log[nextIndex:],
+						PrevLogTerm:  rf.Log[prevIndex].Term,
+						Entries:      rf.Log[nextIndex:],
 						LeaderCommit: rf.commitIndex,
 					}
 
@@ -185,7 +188,7 @@ func (rf *Raft) applyLoop(applyCh chan ApplyMsg) {
 			rf.lastApplied++
 			msg := ApplyMsg{
 				CommandValid: true,
-				Command:      rf.log[rf.lastApplied].Command,
+				Command:      rf.Log[rf.lastApplied].Command,
 				CommandIndex: rf.lastApplied,
 			}
 			go func(msg ApplyMsg) {

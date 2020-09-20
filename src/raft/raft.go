@@ -18,7 +18,10 @@ package raft
 //
 
 import (
+	"bytes"
+	"lab6824/labgob"
 	"lab6824/labrpc"
+	"log"
 	"math/rand"
 	"sync"
 	"sync/atomic"
@@ -115,13 +118,13 @@ type Raft struct {
 	// ----------------------------------------
 
 	// latest term it has seen
-	currentTerm int32
+	CurrentTerm int32
 
 	// index of a peer recieved vote from this peer
-	votedFor int
+	VotedFor int
 
 	// log entries (index starts at 1)
-	log []LogEntry
+	Log []LogEntry
 
 	// ----------------------------------------
 	// volatile state on all servers
@@ -154,7 +157,7 @@ func (rf *Raft) GetState() (int, bool) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
-	term := rf.currentTerm
+	term := rf.CurrentTerm
 	status := rf.status
 	return int(term), status == leader
 }
@@ -173,6 +176,16 @@ func (rf *Raft) persist() {
 	// e.Encode(rf.yyy)
 	// data := w.Bytes()
 	// rf.persister.SaveRaftState(data)
+
+	w := new(bytes.Buffer)
+	e := labgob.NewEncoder(w)
+
+	e.Encode(rf.CurrentTerm)
+	e.Encode(rf.VotedFor)
+	e.Encode(rf.Log)
+
+	data := w.Bytes()
+	rf.persister.SaveRaftState(data)
 }
 
 //
@@ -195,6 +208,23 @@ func (rf *Raft) readPersist(data []byte) {
 	//   rf.xxx = xxx
 	//   rf.yyy = yyy
 	// }
+
+	r := bytes.NewBuffer(data)
+	d := labgob.NewDecoder(r)
+
+	var currentTerm int32
+	var votedFor int
+	var rflog []LogEntry
+
+	if d.Decode(&currentTerm) != nil ||
+		d.Decode(&votedFor) != nil ||
+		d.Decode(&rflog) != nil {
+		log.Fatalf("readPersist: failed\n")
+	} else {
+		rf.CurrentTerm = currentTerm
+		rf.VotedFor = votedFor
+		rf.Log = rflog
+	}
 }
 
 //
@@ -221,16 +251,18 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		return -1, -1, false
 	}
 
-	index := len(rf.log)
-	term := rf.currentTerm
+	index := len(rf.Log)
+	term := rf.CurrentTerm
 
 	DPrintf("leader %v: recieve from client, index=%v, term=%v\n", rf.me, index, term)
 
-	rf.log = append(rf.log, LogEntry{
+	rf.Log = append(rf.Log, LogEntry{
 		Command: command,
 		Term:    term,
 	})
 	rf.matchIndex[rf.me] = index
+
+	rf.persist()
 
 	return index, int(term), true
 }
@@ -287,10 +319,10 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
 	rf.numGrantedVotes = 0
 
-	rf.currentTerm = 0
-	rf.votedFor = -1
+	rf.CurrentTerm = 0
+	rf.VotedFor = -1
 	// create an "empty" log (index starts at 1)
-	rf.log = make([]LogEntry, 1)
+	rf.Log = make([]LogEntry, 1)
 
 	rf.commitIndex = 0
 	rf.lastApplied = 0
