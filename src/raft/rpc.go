@@ -88,6 +88,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
+	defer rf.persist()
 
 	// recieves from outdated candidate,
 	// reject and return immediately.
@@ -123,7 +124,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		reply.VoteGranted = true
 		if rf.VotedFor != args.CandidateID {
 			rf.VotedFor = args.CandidateID
-			rf.persist()
+			// rf.persist()
 		}
 		rf.resetTimer()
 	} else {
@@ -139,6 +140,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
+	defer rf.persist()
 
 	// recieving from outdated leader,
 	// return immediately
@@ -180,7 +182,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	j := i - 1 - args.PrevLogIndex
 	if j < len(args.Entries) {
 		rf.Log = append(rf.Log[:i], args.Entries[j:]...)
-		rf.persist()
+		// rf.persist()
 	}
 
 	// TODO

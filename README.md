@@ -33,7 +33,7 @@ Source codes are in `src/raft`
 To run the test:
 
 ```bash
-cd src/main
+cd src/raft
 go test -run 2A
 ```
 
@@ -42,6 +42,17 @@ go test -run 2A
 To run the test:
 
 ```bash
-cd src/main
+cd src/raft
 go test -run 2B
 ```
+
+#### 2C. Persistence
+
+To run the test:
+
+```bash
+cd src/raft
+go test -run 2C
+```
+
+(This part is not perfectly done yet).

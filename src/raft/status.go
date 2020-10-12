@@ -101,22 +101,39 @@ func (rf *Raft) heartbeatLoop() {
 			return
 		}
 
-		prevIndex := len(rf.Log) - 1
-		args := &AppendEntriesArgs{
-			Term:         rf.CurrentTerm,
-			LeaderID:     rf.me,
-			PrevLogIndex: prevIndex,
-			PrevLogTerm:  rf.Log[prevIndex].Term,
-			Entries:      nil,
-			LeaderCommit: rf.commitIndex,
-		}
+		// prevIndex := len(rf.Log) - 1
+		// args := &AppendEntriesArgs{
+		// 	Term:         rf.CurrentTerm,
+		// 	LeaderID:     rf.me,
+		// 	PrevLogIndex: prevIndex,
+		// 	PrevLogTerm:  rf.Log[prevIndex].Term,
+		// 	Entries:      nil,
+		// 	LeaderCommit: rf.commitIndex,
+		// }
+
+		var waitSending sync.WaitGroup
 
 		for i := range rf.peers {
 			if i == rf.me {
 				continue
 			}
+
+			waitSending.Add(1)
+
 			go func(server int) {
+				prevIndex := rf.nextIndex[server] - 1
+				args := &AppendEntriesArgs{
+					Term:         rf.CurrentTerm,
+					LeaderID:     rf.me,
+					PrevLogIndex: prevIndex,
+					PrevLogTerm:  rf.Log[prevIndex].Term,
+					Entries:      nil,
+					LeaderCommit: rf.commitIndex,
+				}
 				reply := &AppendEntriesReply{}
+
+				waitSending.Done()
+
 				ok := rf.sendAppendEntries(server, args, reply)
 				if ok {
 					rf.handleAppendEntriesReply(server, args, reply)
@@ -124,6 +141,7 @@ func (rf *Raft) heartbeatLoop() {
 			}(i)
 		}
 
+		waitSending.Wait()
 		rf.mu.Unlock()
 		time.Sleep(rf.heartbeatInterval)
 	}
