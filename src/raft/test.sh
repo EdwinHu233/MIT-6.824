@@ -2,7 +2,7 @@
 
 rm log -rf
 
-num_tests=10
+num_tests=100
 
 function mytest() {
     task="$1"
@@ -17,4 +17,6 @@ function mytest() {
     done
 }
     
-mytest 2B
+for arg in "$@"; do
+    mytest "2${arg}"
+done

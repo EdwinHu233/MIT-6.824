@@ -202,17 +202,18 @@ func (rf *Raft) logReplicationLoop() {
 func (rf *Raft) applyLoop(applyCh chan ApplyMsg) {
 	for !rf.killed() {
 		rf.mu.Lock()
-		if rf.lastApplied < rf.commitIndex {
+
+		for rf.lastApplied+1 <= rf.commitIndex &&
+			rf.lastApplied+1 < len(rf.Log) {
 			rf.lastApplied++
 			msg := ApplyMsg{
 				CommandValid: true,
 				Command:      rf.Log[rf.lastApplied].Command,
 				CommandIndex: rf.lastApplied,
 			}
-			go func(msg ApplyMsg) {
-				applyCh <- msg
-			}(msg)
+			applyCh <- msg
 		}
+
 		rf.mu.Unlock()
 		time.Sleep(10 * time.Millisecond)
 	}
