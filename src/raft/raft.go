@@ -313,7 +313,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.requestVoteReplies = make(chan RequestVoteReply)
 	rf.appendEntriesReplies = make(chan AppendEntriesReply)
 
-	rf.heartbeatInterval = 30 * time.Millisecond
+	rf.heartbeatInterval = 50 * time.Millisecond
 
 	rf.resetTimer()
 

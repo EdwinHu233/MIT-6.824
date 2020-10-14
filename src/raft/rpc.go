@@ -36,6 +36,9 @@ type AppendEntriesArgs struct {
 type AppendEntriesReply struct {
 	Term    int32
 	Success bool
+	XTerm   int32
+	XIndex  int32
+	XLen    int32
 }
 
 //
@@ -154,19 +157,33 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	// convert back to follower.
 	rf.convertToFollower(args.Term)
 
-	// TODO
 	// return false if log doesn't contain an entry at PrevLogIndex whose term matches PrevLogTerm
-	if len(rf.Log) <= args.PrevLogIndex ||
-		rf.Log[args.PrevLogIndex].Term != args.PrevLogTerm {
+	if len(rf.Log) <= args.PrevLogIndex {
 		reply.Success = false
 		reply.Term = rf.CurrentTerm
+		reply.XIndex = -1
+		reply.XTerm = -1
+		reply.XLen = int32(len(rf.Log))
+		return
+	}
+	if rf.Log[args.PrevLogIndex].Term != args.PrevLogTerm {
+		XIndex := int32(args.PrevLogIndex)
+		XTerm := int32(rf.Log[XIndex].Term)
+
+		for rf.Log[XIndex-1].Term == rf.Log[XIndex].Term {
+			XIndex--
+		}
+		reply.Success = false
+		reply.Term = rf.CurrentTerm
+		reply.XIndex = XIndex
+		reply.XTerm = XTerm
+		reply.XLen = int32(len(rf.Log))
 		return
 	}
 
 	reply.Success = true
 	reply.Term = rf.CurrentTerm
 
-	// TODO
 	// 1. if an existing entry conflicts with a new one
 	// (same index but different terms),
 	// delete the the existing entry and all that follow it
@@ -185,7 +202,6 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		// rf.persist()
 	}
 
-	// TODO
 	// if leaderCommit > commitIndex,
 	// set commitIndex = min(LeaderCommit, index of the last new entry)
 	if args.LeaderCommit > rf.commitIndex {
@@ -254,8 +270,25 @@ func (rf *Raft) handleAppendEntriesReply(server int, args *AppendEntriesArgs, re
 			}
 		}
 	} else {
-		DPrintf("leader %d: got failed AppendEntriesReply from %d; update nextIndex to %d\n", rf.me, server, args.PrevLogIndex)
-		rf.nextIndex[server] = min(rf.nextIndex[server], args.PrevLogIndex)
+		// DPrintf("leader %d: got failed AppendEntriesReply from %d; update nextIndex to %d\n", rf.me, server, args.PrevLogIndex)
+		// rf.nextIndex[server] = min(rf.nextIndex[server], args.PrevLogIndex)
+		var newNextIndex int
+		if reply.XIndex < 0 {
+			newNextIndex = int(reply.XLen)
+		} else {
+			// check if leader has XTerm
+			i := args.PrevLogIndex
+			for rf.Log[i].Term > reply.XTerm {
+				i--
+			}
+
+			if rf.Log[i].Term == reply.XTerm { // yes
+				newNextIndex = i
+			} else { // no
+				newNextIndex = int(reply.XIndex)
+			}
+		}
+		rf.nextIndex[server] = min(rf.nextIndex[server], newNextIndex)
 	}
 }
 

@@ -17,4 +17,4 @@ function mytest() {
     done
 }
     
-mytest 2A
+mytest 2B
